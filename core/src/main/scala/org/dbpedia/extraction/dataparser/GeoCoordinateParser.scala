@@ -102,12 +102,12 @@ class GeoCoordinateParser(
             }
         }
 
-        // Function to check if a string is a valid direction indicator
+        // Function to check whether a string is a valid direction indicator
         def isValidDirection(str: String): Boolean = {
             latHemLetterMap.contains(str) || lonHemLetterMap.contains(str)
         }
 
-        // Function to check if a string is numeric
+        // Function to check whether a string is numeric
         def isNumeric(str: String): Boolean = {
             try {
                 str.toDouble
@@ -178,7 +178,7 @@ class GeoCoordinateParser(
                     case None => longitude.toDouble
                 }
 
-                // Check if this appears to be missing direction indicators
+                // Check whether this appears to be missing direction indicators
                 // If we have more than 2 parameters and none are valid directions, reject
                 if (properties.length > 2) {
                     val hasValidDirection = properties.drop(2).exists(isValidDirection)
