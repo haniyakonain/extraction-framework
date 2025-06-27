@@ -14,6 +14,7 @@ object GeoCoordinateParserConfig {
 
   //map latitude letters used in languages to the ones used in English ("E" for East and "W" for West)
   val longitudeLetterMap = Map(
+    "af" -> Map("E" -> "E", "W" -> "W", "O" -> "E"),
     "am" -> Map("E" -> "E", "W" -> "W"),
     "ar" -> Map("E" -> "E", "W" -> "W", "شرق" -> "E", "غرب" -> "W"),
     "bg" -> Map("E" -> "E", "W" -> "W", "И" -> "E", "З" -> "W"),
@@ -36,6 +37,7 @@ object GeoCoordinateParserConfig {
 
   // Map latitude letters used in different languages to English ("N" for North and "S" for South)
   val latitudeLetterMap = Map(
+    "af" -> Map("N" -> "N", "S" -> "S"),
     "am" -> Map("N" -> "N", "S" -> "S"),
     "ar" -> Map("N" -> "N", "S" -> "S", "شمال" -> "N", "جنوب" -> "S"),
     "bg" -> Map("N" -> "N", "S" -> "S", "С" -> "N", "Ю" -> "S"),
@@ -55,5 +57,4 @@ object GeoCoordinateParserConfig {
     "ru" -> Map("N" -> "N", "S" -> "S", "С" -> "N", "Ю" -> "S"),
     "zh" -> Map("N" -> "N", "S" -> "S", "北" -> "N", "南" -> "S")
     )
-
 }
