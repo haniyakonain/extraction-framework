@@ -14,33 +14,30 @@ import scala.language.reflectiveCalls
  * Extracts geo-coordinates.
  */
 class GeoCoordinatesMapping(
-                             val ontologyProperty: OntologyProperty,
-                             val coordinates: String,
-                             val latitude: String,
-                             val longitude: String,
-                             val longitudeDegrees: String,
-                             val longitudeMinutes: String,
-                             val longitudeSeconds: String,
-                             val longitudeDirection: String,
-                             val latitudeDegrees: String,
-                             val latitudeMinutes: String,
-                             val latitudeSeconds: String,
-                             val latitudeDirection: String,
-                             context: {
-                               def ontology: Ontology
-                               def redirects: Redirects
-                               def language: Language
-                             }
-                           ) extends PropertyMapping {
-
+  val ontologyProperty : OntologyProperty,
+  val coordinates : String,
+  val latitude : String,
+  val longitude : String,
+  val longitudeDegrees : String,
+  val longitudeMinutes : String,
+  val longitudeSeconds : String,
+  val longitudeDirection : String,
+  val latitudeDegrees : String,
+  val latitudeMinutes : String,
+  val latitudeSeconds : String,
+  val latitudeDirection : String,
+  context : {
+    def ontology : Ontology
+    def redirects : Redirects
+    def language : Language
+  }
+) extends PropertyMapping {
   private val logger = Logger.getLogger(classOf[GeoCoordinatesMapping].getName)
 
   private val geoCoordinateParser = new GeoCoordinateParser(context)
   private val singleGeoCoordinateParser = new SingleGeoCoordinateParser(context)
   private val doubleParser = new DoubleParser(context)
-  private val doubleParserEn = new DoubleParser(context = new {
-    def language: Language = Language("en")
-  })
+  private val doubleParserEn = new DoubleParser(context = new { def language : Language = Language("en") })
   private val stringParser = StringParser
   private val wikiCode = context.language.wikiCode
 
@@ -80,9 +77,10 @@ class GeoCoordinatesMapping(
       ) {
         try {
           return Some(new GeoCoordinate(lat, lon))
-        }
-        catch {
-          case ex: IllegalArgumentException => logger.log(Level.FINE, "Invalid geo coordinate", ex); return None
+        } catch {
+          case ex: IllegalArgumentException =>
+            logger.log(Level.FINE, "Invalid geo coordinate", ex)
+            return None
         }
       }
     }
@@ -105,9 +103,10 @@ class GeoCoordinatesMapping(
 
         try {
           return Some(new GeoCoordinate(latDeg.value, latMin, latSec, latDir, lonDeg.value, lonMin, lonSec, lonDir, false))
-        }
-        catch {
-          case ex: IllegalArgumentException => logger.log(Level.FINE, "Invalid geo coordinate", ex); return None
+        } catch {
+          case ex: IllegalArgumentException =>
+            logger.log(Level.FINE, "Invalid geo coordinate", ex)
+            return None
         }
       }
     }
