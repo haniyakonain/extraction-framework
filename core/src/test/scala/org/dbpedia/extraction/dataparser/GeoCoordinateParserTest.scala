@@ -306,6 +306,48 @@ class GeoCoordinateParserTest extends FlatSpec with Matchers
     parse("pt", "{{coord|38.7223|Norte|9.1393|Oeste}}") should equal (None)
   }
 
+  // === ADDITIONAL TESTS FOR DBPEDIA EXTRACTION LANGUAGES ===
+
+// English - United States (Washington DC coordinates)
+"GeoCoordinateParser - English United States Washington DC" should "return (38.8833, -77.0167)" in {
+  parse("en", "{{coord|38.8833|N|77.0167|W}}") should equal (Some(38.8833, -77.0167))
+}
+
+// German - Vereinigte Staaten (Geographic center coordinates)
+"GeoCoordinateParser - German United States geographic center" should "return (40.0, -100.0)" in {
+  parse("de", "{{coord|40.0|N|100.0|W}}") should equal (Some(40.0, -100.0))
+}
+
+// French - États-Unis (Geographic center variant)
+"GeoCoordinateParser - French United States geographic variant" should "return (40.0, -105.0)" in {
+  parse("fr", "{{coord|40.0|N|105.0|W}}") should equal (Some(40.0, -105.0))
+}
+
+// Serbian - Сједињене Америчке Државе (Washington DC coordinates)
+"GeoCoordinateParser - Serbian United States Washington DC" should "return (38.8833, -77.0167)" in {
+  parse("sr", "{{coord|38.8833|N|77.0167|W}}") should equal (Some(38.8833, -77.0167))
+}
+
+// Slovenian - Združene države Amerike (Washington DC variant)
+"GeoCoordinateParser - Slovenian United States Washington DC variant" should "return (38.8833, -77.033)" in {
+  parse("sl", "{{coord|38.8833|N|77.033|W}}") should equal (Some(38.8833, -77.033))
+}
+
+// Swedish - USA (Geographic center coordinates)
+"GeoCoordinateParser - Swedish USA geographic center" should "return (40.0, -100.0)" in {
+  parse("sv", "{{coord|40.0|N|100.0|W}}") should equal (Some(40.0, -100.0))
+}
+
+// Belarusian - Злучаныя Штаты Амерыкі (Geographic center coordinates)
+"GeoCoordinateParser - Belarusian United States geographic center" should "return (40.0, -100.0)" in {
+  parse("be", "{{coord|40.0|N|100.0|W}}") should equal (Some(40.0, -100.0))
+}
+
+// Greek - Ηνωμένες Πολιτείες Αμερικής (Geographic center coordinates)
+"GeoCoordinateParser - Greek United States geographic center" should "return (40.0, -100.0)" in {
+  parse("el", "{{coord|40.0|N|100.0|W}}") should equal (Some(40.0, -100.0))
+}
+
   private val wikiParser = WikiParser.getInstance()
 
   private def parse(language : String, input : String) : Option[(Double, Double)] =
