@@ -167,8 +167,6 @@ class GeoCoordinateParser(
             //{{coord|latitude|longitude|coordinate parameters|template parameters}}
             case latitude :: longitude :: _ if isNumeric(latitude) && isNumeric(longitude) =>
             {
-                // FIXED: Only parse as decimal coordinates if both are numeric and no direction indicators present
-                // This prevents cases like "{{coord|40.7589|73.9851}}" without directions from being accepted
                 val lat = singleCoordParser.parseSingleCoordinate(latitude) match{
                     case Some(d) => d.toDouble
                     case None => latitude.toDouble
