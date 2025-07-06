@@ -348,6 +348,11 @@ class GeoCoordinateParserTest extends FlatSpec with Matchers
   parse("el", "{{coord|40.0|N|100.0|W}}") should equal (Some(40.0, -100.0))
 }
 
+// Latvian - Amerikas Savienotās Valstis (Washington DC variant)
+"GeoCoordinateParser - Latvian United States Washington DC variant" should "return (38.8833, -77.033)" in {
+  parse("lv", "{{coord|38.8833|N|77.033|W}}") should equal (Some(38.8833, -77.033))
+}
+
   private val wikiParser = WikiParser.getInstance()
 
   private def parse(language : String, input : String) : Option[(Double, Double)] =
