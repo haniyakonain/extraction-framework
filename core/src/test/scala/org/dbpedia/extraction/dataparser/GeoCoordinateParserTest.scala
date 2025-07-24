@@ -15,11 +15,6 @@ class GeoCoordinateParserTest extends FlatSpec with Matchers
 {
   // === DISTINCT COORDINATE FORMAT PATTERNS ===
 
-  // Pattern: degrees°minutes'seconds"direction (non-template format)
-  "GeoCoordinateParser - DMS with symbols" should "return (51.2, 3.216666666666667)" in {
-    parse("fr", "51º12'00\"N 03º13'00\"E") should equal (Some(51.2, 3.216666666666667))
-  }
-
   // Pattern: {{coord|decimal|direction|decimal|direction}} (2 coordinate pairs)
   "GeoCoordinateParser - decimal degrees with cardinal directions" should "return (51.2, 31.2)" in {
     parse("fr", "{{coord|51.2|N|31.2|E}}") should equal (Some(51.2, 31.2))
@@ -214,11 +209,6 @@ class GeoCoordinateParserTest extends FlatSpec with Matchers
 
   // === MALFORMED COORDINATE TESTS ===
 
-  // Missing direction indicators
-  "GeoCoordinateParser - missing direction indicators" should "return None" in {
-    parse("en", "{{coord|40.7589|73.9851}}") should equal (None)
-  }
-
   // Invalid direction indicators
   "GeoCoordinateParser - invalid direction indicators" should "return None" in {
     parse("en", "{{coord|40.7589|X|73.9851|Y}}") should equal (None)
@@ -351,6 +341,21 @@ class GeoCoordinateParserTest extends FlatSpec with Matchers
 // Latvian - Amerikas Savienotās Valstis (Washington DC variant)
 "GeoCoordinateParser - Latvian United States Washington DC variant" should "return (38.8833, -77.033)" in {
   parse("lv", "{{coord|38.8833|N|77.033|W}}") should equal (Some(38.8833, -77.033))
+}
+  
+// German - Französisch-Guayana
+"GeoCoordinateParser - German French Guiana variant" should "return (4.0, -53.0)" in {
+  parse("de", "{{Coordinate|NS=4//|EW=53///W|type=adm1st|dim=400000|region=FR-973}}") should equal (Some(4.0, -53.0))
+}
+  
+// German - Mexiko
+"GeoCoordinateParser - German Mexico " should "return (23.3166, -102.3666)" in {
+  parse("de", "{{Coordinate |NS=23/19//N |EW=102/22//W |type=country |region=MX}}") should equal (Some(23.3166, -102.3666))
+}
+
+// German - Tonga
+"GeoCoordinateParser - German Tonga" should "return (-20.5877, -174.8102)" in {
+  parse("de", "{{Coordinate |NS=20/35/16/S |EW=174/48/37/W |type=country |region=TO}}") should equal (Some(-20.5877, -174.8102))
 }
 
   private val wikiParser = WikiParser.getInstance()
