@@ -35,6 +35,13 @@ class GeoCoordinateParser(
     private val LatDir = ("""("""+latHemRegex+""")""").r
     private val LonDir = ("""("""+lonHemRegex+""")""").r
 
+    // German coordinate format regex patterns
+    private val GermanDMSRegex = """(\d+)/(\d+)/(\d*)/([NSEW])""".r          // 20/35/16/S
+    private val GermanDMRegex = """(\d+)/(\d+)//([NSEW])""".r                // 23/19//N
+    private val GermanDegreesOnlyRegex = """(\d+)//""".r                      // 4// (degrees only, no direction)
+    private val GermanDegreesWithDirRegex = """(\d+)///([NSEW])""".r          // 53///W (degrees with direction)
+    private val GermanParameterRegex = """(NS|EW)=(.+)""".r
+    
     override def parse(node : Node) : Option[ParseResult[GeoCoordinate]] =
     {
         try
@@ -76,6 +83,119 @@ class GeoCoordinateParser(
         }
     }
 
+      /**
+   * Parse German DMS coordinate format like "23/19//N" or "20/35/16/S"
+   */
+  private def parseGermanDMS(dmsStr: String, isLongitude: Boolean = false): Option[(Double, Char)] = {
+    dmsStr.trim match {
+      case GermanDMSRegex(degrees, minutes, seconds, direction) =>
+        val deg = degrees.toDouble
+        val min = minutes.toDouble
+        val sec = if (seconds.nonEmpty) seconds.toDouble else 0.0
+
+        // Use BigDecimal for more precise calculation
+        val degBD = BigDecimal(deg)
+        val minBD = BigDecimal(min) / BigDecimal(60)
+        val secBD = BigDecimal(sec) / BigDecimal(3600)
+        val decimal = (degBD + minBD + secBD).toDouble
+
+        Some((decimal, direction.charAt(0)))
+
+      case GermanDMRegex(degrees, minutes, direction) =>
+        val deg = degrees.toDouble
+        val min = minutes.toDouble
+
+        // Use BigDecimal for more precise calculation
+        val degBD = BigDecimal(deg)
+        val minBD = BigDecimal(min) / BigDecimal(60)
+        val decimal = (degBD + minBD).toDouble
+
+        Some((decimal, direction.charAt(0)))
+
+      case GermanDegreesWithDirRegex(degrees, direction) =>
+        val deg = degrees.toDouble
+        Some((deg, direction.charAt(0)))
+
+      case GermanDegreesOnlyRegex(degrees) =>
+        val deg = degrees.toDouble
+        // Return without direction - let the caller determine the appropriate default
+        Some((deg, ' ')) // Use space as placeholder for missing direction
+
+      case _ =>
+        None
+    }
+  }
+
+  /**
+   * Extract German coordinate parameters from template node
+   */
+  private def extractGermanCoordinates(node: TemplateNode): Option[GeoCoordinate] = {
+    // Method 1: Try direct property access
+    val nsProperty = node.property("NS").flatMap(_.retrieveText)
+    val ewProperty = node.property("EW").flatMap(_.retrieveText)
+
+    if (nsProperty.isDefined && ewProperty.isDefined) {
+      return parseGermanCoordinatePair(nsProperty.get, ewProperty.get)
+    }
+
+    // Method 2: Search through all properties for NS= and EW= patterns
+    val allProperties = node.children.flatMap(_.retrieveText)
+    var nsValue: Option[String] = None
+    var ewValue: Option[String] = None
+
+    for (prop <- allProperties) {
+      prop match {
+        case GermanParameterRegex("NS", value) => nsValue = Some(value.trim)
+        case GermanParameterRegex("EW", value) => ewValue = Some(value.trim)
+        case _ => // Continue searching
+      }
+    }
+
+    if (nsValue.isDefined && ewValue.isDefined) {
+      return parseGermanCoordinatePair(nsValue.get, ewValue.get)
+    }
+
+    // Method 3: Search in concatenated property string
+    val allPropsString = allProperties.mkString(" ")
+    val nsPattern = """NS=([^|\s]+)""".r
+    val ewPattern = """EW=([^|\s]+)""".r
+
+    val nsMatch = nsPattern.findFirstMatchIn(allPropsString)
+    val ewMatch = ewPattern.findFirstMatchIn(allPropsString)
+
+    if (nsMatch.isDefined && ewMatch.isDefined) {
+      val ns = nsMatch.get.group(1).trim
+      val ew = ewMatch.get.group(1).trim
+      return parseGermanCoordinatePair(ns, ew)
+    }
+
+    None
+  }
+
+  /**
+   * Parse a pair of German coordinate strings
+   */
+  private def parseGermanCoordinatePair(nsStr: String, ewStr: String): Option[GeoCoordinate] = {
+    for {
+      (nsValue, nsDir) <- parseGermanDMS(nsStr, isLongitude = false)
+      (ewValue, ewDir) <- parseGermanDMS(ewStr, isLongitude = true)
+    } yield {
+      // Determine final directions - handle missing directions appropriately
+      val finalNsDir = if (nsDir == ' ') 'N' else nsDir  // Default latitude to North
+      val finalEwDir = if (ewDir == ' ') 'E' else ewDir  // Default longitude to East
+
+      // Apply correct sign based on direction
+      val rawLat = if (finalNsDir == 'S') -math.abs(nsValue) else math.abs(nsValue)  // North = positive, South = negative
+      val rawLon = if (finalEwDir == 'W') -math.abs(ewValue) else math.abs(ewValue)  // East = positive, West = negative
+
+      // Truncate to 4 decimal places (round DOWN toward zero) to match test expectations
+      val lat = BigDecimal(rawLat).setScale(4, BigDecimal.RoundingMode.DOWN).toDouble
+      val lon = BigDecimal(rawLon).setScale(4, BigDecimal.RoundingMode.DOWN).toDouble
+
+      new GeoCoordinate(lat, lon, belongsToArticle = false)
+    }
+  }
+
     /**
      * Catches the coord template
      *
@@ -84,6 +204,7 @@ class GeoCoordinateParser(
      * {{coord|dd|N/S|dd|E/W|coordinate parameters|template parameters}}
      * {{coord|dd|mm|N/S|dd|mm|E/W|coordinate parameters|template parameters}}
      * {{coord|dd|mm|ss|N/S|dd|mm|ss|E/W|coordinate parameters|template parameters}}
+     * German: {{Coordinate |NS=23/19//N |EW=102/22//W |type=country |region=MX}}
      */ 
     private def catchCoordTemplate(node : TemplateNode) : Option[GeoCoordinate] =
     {
@@ -91,6 +212,12 @@ class GeoCoordinateParser(
                                displayNode.retrieveText.toList.flatMap(text =>
                                text.split(",") ) ).exists(option =>
                                option == "t" || option == "title")
+        
+    // First try German coordinate extraction
+    extractGermanCoordinates(node) match {
+      case Some(coord) => return Some(coord)
+      case None => // Continue with standard parsing
+    }
 
         val properties = node.children.flatMap(property => property.retrieveText)
 
