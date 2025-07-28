@@ -9,7 +9,8 @@ object GeoCoordinateParserConfig {
     "coordenadas",     // Spanish
     "coordonnées",     // French
     "coordinaten",     // Dutch
-    "koordinaten"      // German
+    "koordinaten",     // German
+    "coordinate"      // German {{Coordinate ...}} Template
   )
 
   //map latitude letters used in languages to the ones used in English ("E" for East and "W" for West)
