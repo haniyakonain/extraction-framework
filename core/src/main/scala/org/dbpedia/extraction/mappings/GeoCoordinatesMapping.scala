@@ -11,7 +11,7 @@ import scala.collection.mutable.ArrayBuffer
 import scala.language.reflectiveCalls
 
 /**
- * Extracts geo-coodinates.
+ * Extracts geo-coordinates.
  */
 class GeoCoordinatesMapping(
   val ontologyProperty : OntologyProperty,
@@ -32,7 +32,6 @@ class GeoCoordinatesMapping(
     def language : Language
   }
 ) extends PropertyMapping {
-
   private val logger = Logger.getLogger(classOf[GeoCoordinatesMapping].getName)
 
   private val geoCoordinateParser = new GeoCoordinateParser(context)
@@ -47,10 +46,6 @@ class GeoCoordinatesMapping(
   private val lonOntProperty = context.ontology.properties("geo:long")
   private val pointOntProperty = context.ontology.properties("georss:point")
   private val featureOntClass = context.ontology.classes("geo:SpatialThing")
-
-  // ✅ NEW hemisphere properties
-  private val latnsOntProperty = context.ontology.properties("dbp:latns")
-  private val longewOntProperty = context.ontology.properties("dbp:longew")
 
   override val datasets = Set(DBpediaDatasets.OntologyPropertiesGeo)
 
@@ -132,13 +127,6 @@ class GeoCoordinatesMapping(
     quads += new Quad(context.language, DBpediaDatasets.OntologyPropertiesGeo, instanceUri, latOntProperty, coord.latitude.toString, sourceUri)
     quads += new Quad(context.language, DBpediaDatasets.OntologyPropertiesGeo, instanceUri, lonOntProperty, coord.longitude.toString, sourceUri)
     quads += new Quad(context.language, DBpediaDatasets.OntologyPropertiesGeo, instanceUri, pointOntProperty, coord.latitude + " " + coord.longitude, sourceUri)
-
-    // ✅ Add hemisphere indicators
-    val latHemisphere = if (coord.latitude < 0) "S" else "N"
-    val lonHemisphere = if (coord.longitude < 0) "W" else "E"
-
-    quads += new Quad(context.language, DBpediaDatasets.OntologyPropertiesGeo, instanceUri, latnsOntProperty, latHemisphere, sourceUri)
-    quads += new Quad(context.language, DBpediaDatasets.OntologyPropertiesGeo, instanceUri, longewOntProperty, lonHemisphere, sourceUri)
 
     quads
   }
