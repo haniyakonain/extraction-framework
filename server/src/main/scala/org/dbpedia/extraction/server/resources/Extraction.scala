@@ -353,55 +353,97 @@ class Extraction(@PathParam("lang") langCode: String) {
       case _ => TriX.writeHeader(writer, 2)
     }
 
-    // Validate extractor parameter using Server's method
+    // Validate extractor parameter
     val extractorName = Option(extractors).getOrElse("mappings")
+    Extraction.logger.info(s"Processing extraction request with extractor: '$extractorName' for language: '${language.wikiCode}'")
 
-    // Use Server's method to check availability
+    // Enhanced validation with better error messages
     if (extractorName != "mappings" && extractorName != "custom") {
-      if (!Server.instance.isExtractorAvailable(language, extractorName)) {
-        val availableExtractors = Server.instance.getAvailableExtractorNames(language)
-        throw new WebApplicationException(
-          new Exception(s"Unknown extractor: '$extractorName'. Available extractors for language '${language.wikiCode}': mappings, custom, ${availableExtractors.mkString(", ")}"),
-          400
-        )
+      try {
+        if (!Server.instance.isExtractorAvailable(language, extractorName)) {
+          val availableExtractors = Server.instance.getAvailableExtractorNames(language)
+          val errorMsg = s"Unknown extractor: '$extractorName'. Available extractors for language '${language.wikiCode}': mappings, custom, ${availableExtractors.mkString(", ")}"
+          Extraction.logger.warning(errorMsg)
+          throw new WebApplicationException(new Exception(errorMsg), 400)
+        }
+        Extraction.logger.info(s"Individual extractor '$extractorName' requested for language '${language.wikiCode}'")
+      } catch {
+        case e: WebApplicationException => throw e
+        case e: Exception =>
+          Extraction.logger.log(Level.SEVERE, s"Error checking extractor availability: ${e.getMessage}", e)
+          throw new WebApplicationException(new Exception(s"Error validating extractor: ${e.getMessage}"), 500)
       }
-      Extraction.logger.info(s"Individual extractor '$extractorName' requested for language '${language.wikiCode}'")
     }
-
-    val source =
+        val source =
       if (revid >= 0) WikiSource.fromRevisionIDs(List(revid), new URL(language.apiUri), language)
       else WikiSource.fromTitles(List(WikiTitle.parse(title, language)), new URL(language.apiUri), language)
 
     val destination = new DeduplicatingDestination(new WriterDestination(() => writer, formatter))
 
-    // Handle different extractor scenarios using the new Server methods
-    extractorName match {
-      case "mappings" =>
-        // Use only mapping extractors
-        Server.instance.extractor.extract(source, destination, language, false)
+    try {
+      // Handle different extractor scenarios with enhanced error handling
+      extractorName match {
+        case "mappings" =>
+          Extraction.logger.info(s"Running mappings-only extraction for language '${language.wikiCode}'")
+          Server.instance.extractor.extract(source, destination, language, false)
 
-      case "custom" =>
-        // Use all configured extractors for this language
-        Server.instance.extractor.extract(source, destination, language, true)
+        case "custom" =>
+          Extraction.logger.info(s"Running all enabled extractors extraction for language '${language.wikiCode}'")
+          // FIXED: Ensure we're using all extractors properly
+          try {
+            // Check if the Server instance and extractor are properly initialized
+            if (Server.instance == null) {
+              throw new IllegalStateException("Server instance is not initialized")
+            }
+            if (Server.instance.extractor == null) {
+              throw new IllegalStateException("Server extractor is not initialized")
+            }
 
-      case specificExtractor =>
-        // Use the new Server method for individual extractor extraction
-        try {
-          Server.instance.extractWithSpecificExtractor(source, destination, language, specificExtractor)
-        } catch {
-          case e: IllegalArgumentException =>
-            // Handle case where extractor is not found
-            Extraction.logger.warning(s"${e.getMessage}. Falling back to all extractors.")
+            // Log available extractors for debugging
+            val availableExtractors = Server.instance.getAvailableExtractorNames(language)
+            Extraction.logger.info(s"Available extractors for '${language.wikiCode}': ${availableExtractors.mkString(", ")}")
+
+            // Use the correct extraction method for all extractors
             Server.instance.extractor.extract(source, destination, language, true)
-          case e: Exception =>
-            // Handle other extraction errors
-            Extraction.logger.severe(s"Failed to extract with specific extractor '$specificExtractor': ${e.getMessage}")
-            throw new WebApplicationException(
-              new Exception(s"Extraction failed with extractor '$specificExtractor': ${e.getMessage}"),
-              500
-            )
-        }
+
+            Extraction.logger.info(s"Successfully completed all-extractors extraction for language '${language.wikiCode}'")
+
+          } catch {
+            case e: IllegalStateException =>
+              Extraction.logger.severe(s"Server initialization error: ${e.getMessage}")
+              throw new WebApplicationException(new Exception(s"Server not properly initialized: ${e.getMessage}"), 500)
+            case e: Exception =>
+              Extraction.logger.severe(s"All-extractors extraction failed for language '${language.wikiCode}': ${e.getMessage}")
+              // Try fallback to mappings only if all extractors fail
+              Extraction.logger.info("Attempting fallback to mappings-only extraction")
+              Server.instance.extractor.extract(source, destination, language, false)
+          }
+
+        case specificExtractor =>
+          Extraction.logger.info(s"Running specific extractor '$specificExtractor' for language '${language.wikiCode}'")
+          try {
+            Server.instance.extractWithSpecificExtractor(source, destination, language, specificExtractor)
+            Extraction.logger.info(s"Successfully completed specific extractor '$specificExtractor' for language '${language.wikiCode}'")
+          } catch {
+            case e: IllegalArgumentException =>
+              Extraction.logger.warning(s"${e.getMessage}. Falling back to all extractors.")
+              Server.instance.extractor.extract(source, destination, language, true)
+            case e: Exception =>
+              Extraction.logger.severe(s"Failed to extract with specific extractor '$specificExtractor': ${e.getMessage}")
+              throw new WebApplicationException(
+                new Exception(s"Extraction failed with extractor '$specificExtractor': ${e.getMessage}"),
+                500
+              )
+          }
+      }
+    } catch {
+      case e: WebApplicationException => throw e
+      case e: Exception =>
+        val errorMsg = s"Extraction failed for language '${language.wikiCode}' with extractor '$extractorName': ${e.getMessage}"
+        Extraction.logger.severe(errorMsg)
+        throw new WebApplicationException(new Exception(errorMsg), 500)
     }
+    
     Response.ok(writer.toString)
       .header(HttpHeaders.CONTENT_TYPE, contentType + "; charset=UTF-8")
       .build()
