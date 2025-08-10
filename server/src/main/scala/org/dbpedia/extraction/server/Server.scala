@@ -13,6 +13,8 @@ import org.dbpedia.extraction.util.{ExtractionRecorder, Language}
 import org.dbpedia.extraction.util.Language.wikiCodeOrdering
 import org.dbpedia.extraction.util.StringUtils.prettyMillis
 import org.dbpedia.extraction.wikiparser.WikiTitle
+import org.dbpedia.extraction.sources.Source
+import org.dbpedia.extraction.destinations.Destination
 
 import scala.collection.immutable.SortedMap
 import scala.collection.mutable
@@ -20,112 +22,187 @@ import scala.collection.mutable.ListBuffer
 import scala.reflect.{ClassTag, classTag}
 
 class Server(
-  private val password : String,
-  languages : Seq[Language],
-  val paths: Paths,
-  mappingTestExtractors: Seq[Class[_ <: Extractor[_]]],
-  customTestExtractors: Map[Language, Seq[Class[_ <: Extractor[_]]]])
-{
-    val managers: SortedMap[Language, MappingStatsManager] = {
-      val tuples = languages.map(lang => lang -> new MappingStatsManager(paths.statsDir, lang))
-      SortedMap(tuples: _*)
-    }
+              private val password: String,
+              languages: Seq[Language],
+              val paths: Paths,
+              mappingTestExtractors: Seq[Class[_ <: Extractor[_]]],
+              customTestExtractors: Map[Language, Seq[Class[_ <: Extractor[_]]]]) {
+  val managers: SortedMap[Language, MappingStatsManager] = {
+    val tuples = languages.map(lang => lang -> new MappingStatsManager(paths.statsDir, lang))
+    SortedMap(tuples: _*)
+  }
 
-    val redirects: Map[Language, Redirects] = {
-      managers.map(manager => (manager._1, buildTemplateRedirects(manager._2.wikiStats.redirects, manager._1)))
+  val redirects: Map[Language, Redirects] = {
+    managers.map(manager => (manager._1, buildTemplateRedirects(manager._2.wikiStats.redirects, manager._1)))
+  }
+
+  val extractor: ExtractionManager = new DynamicExtractionManager(managers(_).updateStats(_), languages, paths, redirects, mappingTestExtractors, customTestExtractors)
+
+  extractor.updateAll
+
+  def adminRights(pass: String): Boolean = password == pass
+
+  /**
+   * Extract using a specific extractor only
+   * This method creates a temporary extraction manager with only the requested extractor
+   */
+  def extractWithSpecificExtractor(source: Source, destination: Destination, language: Language, extractorName: String): Unit = {
+    val logger = Server.logger
+
+    try {
+      // Get the manager for this language
+      val manager = managers.get(language) match {
+        case Some(mgr) => mgr
+        case None => throw new IllegalArgumentException(s"No manager configured for language ${language.wikiCode}")
+      }
+
+      // Get all available extractors for this language from the custom test extractors
+      val customExtractorsForLang = customTestExtractors.getOrElse(language, Seq.empty)
+      val mappingExtractors = mappingTestExtractors
+
+      // Find the specific extractor class by name
+      val extractorClass = (customExtractorsForLang ++ mappingExtractors).find { extractorClass =>
+        extractorClass.getSimpleName == extractorName ||
+          extractorClass.getSimpleName == (extractorName + "Extractor") ||
+          extractorClass.getName.endsWith("." + extractorName)
+      } match {
+        case Some(clazz) => clazz
+        case None => throw new IllegalArgumentException(s"Extractor '$extractorName' not found for language ${language.wikiCode}")
+      }
+
+      logger.info(s"Creating individual extraction manager for extractor: ${extractorClass.getSimpleName}")
+
+      // Create a temporary extraction manager with only this extractor
+      val singleExtractorManager = new DynamicExtractionManager(
+        managers(_).updateStats(_),
+        Seq(language),
+        paths,
+        redirects,
+        if (mappingExtractors.contains(extractorClass)) Seq(extractorClass) else Seq.empty,
+        if (customExtractorsForLang.contains(extractorClass)) Map(language -> Seq(extractorClass)) else Map.empty
+      )
+
+      // Initialize the single extractor manager
+      singleExtractorManager.updateAll
+
+      // Run extraction with this single extractor manager
+      singleExtractorManager.extract(source, destination, language, true)
+
+      logger.info(s"Successfully completed extraction with ${extractorClass.getSimpleName} for language ${language.wikiCode}")
+
+    } catch {
+      case e: Exception =>
+        logger.severe(s"Failed to extract with specific extractor '$extractorName' for language ${language.wikiCode}: ${e.getMessage}")
+        throw e
     }
-        
-    val extractor: ExtractionManager = new DynamicExtractionManager(managers(_).updateStats(_), languages, paths, redirects, mappingTestExtractors, customTestExtractors)
-    
-    extractor.updateAll
-        
-    def adminRights(pass : String) : Boolean = password == pass
+  }
+
+  /**
+   * Get available extractor names for a specific language
+   */
+  def getAvailableExtractorNames(language: Language): Seq[String] = {
+    val customExtractorsForLang = customTestExtractors.getOrElse(language, Seq.empty)
+    val allExtractors = mappingTestExtractors ++ customExtractorsForLang
+
+    allExtractors.map(_.getSimpleName).distinct.sorted
+  }
+
+  /**
+   * Check if a specific extractor is available for a language
+   */
+  def isExtractorAvailable(language: Language, extractorName: String): Boolean = {
+    getAvailableExtractorNames(language).exists { name =>
+      name == extractorName ||
+        name == (extractorName + "Extractor") ||
+        name.endsWith(extractorName)
+    }
+  }
 }
 
 /**
  * The DBpedia server.
  * FIXME: more flexible configuration.
  */
-object Server
-{
-    val logger: Logger = Logger.getLogger(getClass.getName)
+object Server {
+  val logger: Logger = Logger.getLogger(getClass.getName)
 
-    private var _instance: Server = _
+  private var _instance: Server = _
 
-    def instance: Server = _instance
+  def instance: Server = _instance
 
-    private var _config: ServerConfiguration = _
+  private var _config: ServerConfiguration = _
 
-    def config: ServerConfiguration = _config
-    
-    def main(args : Array[String])
-    {
-        val millis = System.currentTimeMillis
-        
-        logger.info("DBpedia server starting")
-        
-        require(args != null && args.length == 1, "need the server configuration file as argument.")
+  def config: ServerConfiguration = _config
 
-        // Load properties
-        _config = new ServerConfiguration(args(0))
-        
-        val mappingsUrl = new URL(_config.mappingsUrl)
-        
-        val localServerUrl = URI.create(_config.localServerUrl)
-        
-        val serverPassword = _config.serverPassword
+  def main(args: Array[String]) {
+    val millis = System.currentTimeMillis
 
-        val languages = _config.languages
+    logger.info("DBpedia server starting")
 
-        val paths = new Paths(new URL(mappingsUrl, "index.php"), new URL(mappingsUrl, "api.php"), _config.statisticsDir, _config.ontologyFile, _config.mappingsDir)
-        
-        _instance = new Server(serverPassword, languages, paths, _config.mappingTestExtractorClasses, _config.customTestExtractorClasses)
-        
-        // Configure the HTTP server
-        val resources = new PackagesResourceConfig("org.dbpedia.extraction.server.resources", "org.dbpedia.extraction.server.providers")
-        
-        // redirect URLs like "/foo/../extractionSamples" to "/extractionSamples/" (with a slash at the end)
-        val features = resources.getFeatures
-        features.put(ResourceConfig.FEATURE_CANONICALIZE_URI_PATH, true)
-        features.put(ResourceConfig.FEATURE_NORMALIZE_URI, true)
-        features.put(ResourceConfig.FEATURE_REDIRECT, true)
-        // When trace is on, Jersey includes "X-Trace" headers in the HTTP response.
-        // But when it receives a bad URI (e.g. by Apache), Jersey does no tracing. :-( 
-        // features.put(ResourceConfig.FEATURE_TRACE, true)
+    require(args != null && args.length == 1, "need the server configuration file as argument.")
 
-        HttpServerFactory.create(localServerUrl, resources).start()
+    // Load properties
+    _config = new ServerConfiguration(args(0))
 
-        logger.info("DBpedia server started in "+prettyMillis(System.currentTimeMillis - millis) + " listening on " + localServerUrl)
+    val mappingsUrl = new URL(_config.mappingsUrl)
+
+    val localServerUrl = URI.create(_config.localServerUrl)
+
+    val serverPassword = _config.serverPassword
+
+    val languages = _config.languages
+
+    val paths = new Paths(new URL(mappingsUrl, "index.php"), new URL(mappingsUrl, "api.php"), _config.statisticsDir, _config.ontologyFile, _config.mappingsDir)
+
+    _instance = new Server(serverPassword, languages, paths, _config.mappingTestExtractorClasses, _config.customTestExtractorClasses)
+
+    // Configure the HTTP server
+    val resources = new PackagesResourceConfig("org.dbpedia.extraction.server.resources", "org.dbpedia.extraction.server.providers")
+
+    // redirect URLs like "/foo/../extractionSamples" to "/extractionSamples/" (with a slash at the end)
+    val features = resources.getFeatures
+    features.put(ResourceConfig.FEATURE_CANONICALIZE_URI_PATH, true)
+    features.put(ResourceConfig.FEATURE_NORMALIZE_URI, true)
+    features.put(ResourceConfig.FEATURE_REDIRECT, true)
+    // When trace is on, Jersey includes "X-Trace" headers in the HTTP response.
+    // But when it receives a bad URI (e.g. by Apache), Jersey does no tracing. :-(
+    // features.put(ResourceConfig.FEATURE_TRACE, true)
+
+    HttpServerFactory.create(localServerUrl, resources).start()
+
+    logger.info("DBpedia server started in " + prettyMillis(System.currentTimeMillis - millis) + " listening on " + localServerUrl)
+  }
+
+  /**
+   * Builds template redirects from Wiki statistics as collected by {todo link CreateMappingStats}
+   * Main purpose is to clean template names from the template namespace so that redirects can be used in Extractors
+   * (Extractors use decoded wiki titles)
+   *
+   * @param redirects
+   * @return
+   */
+  def buildTemplateRedirects(redirects: Map[String, String], language: Language): Redirects = {
+    new Redirects(redirects.map { case (from, to) =>
+      (WikiTitle.parse(from, language).decoded, WikiTitle.parse(to, language).decoded)
+    })
+  }
+
+  private val extractionRecorder = new mutable.HashMap[ClassTag[_], mutable.HashMap[Language, ExtractionRecorder[_]]]()
+
+  def getExtractionRecorder[T: ClassTag](lang: Language, dataset: Dataset = null): org.dbpedia.extraction.util.ExtractionRecorder[T] = {
+    extractionRecorder.get(classTag[T]) match {
+      case Some(s) => s.get(lang) match {
+        case None =>
+          s(lang) = new ExtractionRecorder[T](null, 2000, null, null, if (dataset != null) ListBuffer(dataset) else ListBuffer())
+          s(lang).initialize(lang)
+          s(lang).asInstanceOf[ExtractionRecorder[T]]
+        case Some(er) =>
+          if (dataset != null) if (!er.datasets.contains(dataset)) er.datasets += dataset
+          er.asInstanceOf[ExtractionRecorder[T]]
+      }
+      case None =>
+        extractionRecorder(classTag[T]) = new mutable.HashMap[Language, ExtractionRecorder[_]]()
+        getExtractionRecorder[T](lang, dataset)
     }
-
-    /**
-     * Builds template redirects from Wiki statistics as collected by {todo link CreateMappingStats}
-     * Main purpose is to clean template names from the template namespace so that redirects can be used in Extractors
-     * (Extractors use decoded wiki titles)
-     * @param redirects
-     * @return
-     */
-    def buildTemplateRedirects(redirects: Map[String, String], language: Language): Redirects = {
-      new Redirects(redirects.map { case (from, to) =>
-        (WikiTitle.parse(from, language).decoded, WikiTitle.parse(to, language).decoded)
-      })
-    }
-
-    private val extractionRecorder = new mutable.HashMap[ClassTag[_], mutable.HashMap[Language, ExtractionRecorder[_]]]()
-    def getExtractionRecorder[T: ClassTag](lang: Language, dataset : Dataset = null): org.dbpedia.extraction.util.ExtractionRecorder[T] = {
-        extractionRecorder.get(classTag[T]) match{
-            case Some(s) => s.get(lang) match {
-                case None =>
-                    s(lang) = new ExtractionRecorder[T](null, 2000, null, null, if(dataset != null) ListBuffer(dataset) else ListBuffer())
-                    s(lang).initialize(lang)
-                    s(lang).asInstanceOf[ExtractionRecorder[T]]
-                case Some(er) =>
-                    if(dataset != null) if(!er.datasets.contains(dataset)) er.datasets += dataset
-                    er.asInstanceOf[ExtractionRecorder[T]]
-            }
-            case None =>
-                extractionRecorder(classTag[T]) = new mutable.HashMap[Language, ExtractionRecorder[_]]()
-                getExtractionRecorder[T](lang, dataset)
-        }
-    }
+  }
 }
