@@ -22,13 +22,8 @@ import scala.collection.immutable.SortedMap
 import scala.collection.mutable
 import scala.collection.mutable.ListBuffer
 import scala.reflect.{ClassTag, classTag}
-import scala.util.{Failure, Success, Try}
 import scala.language.existentials
-import scala.collection.JavaConverters._
 
-/**
- * Optimized DBpedia server class with Guava caching support for extraction operations
- */
 class Server(
   private val password : String,
   languages : Seq[Language],
@@ -41,9 +36,9 @@ class Server(
       SortedMap(tuples: _*)
     }
 
-  val redirects: Map[Language, Redirects] = {
+    val redirects: Map[Language, Redirects] = {
     managers.map(manager => (manager._1, Server.buildTemplateRedirects(manager._2.wikiStats.redirects, manager._1)))
-  }
+    }
 
   // Cache key for single extractor managers
   private case class ExtractorCacheKey(language: Language, extractorClass: Class[_ <: Extractor[_]])
@@ -51,12 +46,10 @@ class Server(
   // Guava LoadingCache for single extractor managers with proper cache loader
 private val singleExtractorCache: LoadingCache[ExtractorCacheKey, ExtractionManager] = {
   CacheBuilder.newBuilder()
-    .maximumSize(20)
-    .expireAfterAccess(10, TimeUnit.MINUTES)
+    .maximumSize(100)
+    //.expireAfterAccess(10, TimeUnit.MINUTES)
     .build(new CacheLoader[ExtractorCacheKey, ExtractionManager]() {
       override def load(key: ExtractorCacheKey): ExtractionManager = {
-        logger.info(s"Cache loader: Creating extraction manager for ${key.extractorClass.getSimpleName} in ${key.language.wikiCode}")
-
         val manager = new DynamicExtractionManager(
           managers(_).updateStats(_),
           Seq(key.language),
@@ -70,7 +63,6 @@ private val singleExtractorCache: LoadingCache[ExtractorCacheKey, ExtractionMana
         // ADD ERROR HANDLING HERE:
         try {
           manager.updateAll
-          logger.info(s"Cache loader: Successfully initialized extraction manager for ${key.extractorClass.getSimpleName} in ${key.language.wikiCode}")
           manager
         } catch {
           case e: Exception =>
@@ -84,18 +76,8 @@ private val singleExtractorCache: LoadingCache[ExtractorCacheKey, ExtractionMana
 
   // Main extraction manager with ALL extractors
   val extractor: ExtractionManager = {
-    logger.info("Creating main DynamicExtractionManager with ALL configured extractors")
-    logger.info(s"Mapping extractors: ${mappingTestExtractors.map(_.getSimpleName).mkString(", ")}")
-    customTestExtractors.foreach { case (lang, extractors) =>
-      logger.info(s"Custom extractors for ${lang.wikiCode}: ${extractors.map(_.getSimpleName).mkString(", ")}")
-    }
-
     new DynamicExtractionManager(managers(_).updateStats(_), languages, paths, redirects, mappingTestExtractors, customTestExtractors)
   }
-
-
-  // Log final configuration
-  logExtractorConfiguration()
 
   def adminRights(pass: String): Boolean = password == pass
 
@@ -103,15 +85,12 @@ private val singleExtractorCache: LoadingCache[ExtractorCacheKey, ExtractionMana
    * Enhanced extract using a specific extractor with Guava caching optimization
    */
   def extractWithSpecificExtractor(source: Source, destination: Destination, language: Language, extractorName: String): Unit = {
-    logger.info(s"Starting single extractor extraction: '$extractorName' for language: ${language.wikiCode}")
-
     // Validate language support - this will throw appropriate exceptions
     val availableExtractors = getAvailableExtractorNames(language)
 
     // Find the extractor class
     val extractorClass = findExtractorClass(language, extractorName) match {
       case Some(clazz) =>
-        logger.info(s"Found extractor class: ${clazz.getSimpleName} for request '$extractorName'")
         clazz
       case None =>
         throw new IllegalArgumentException(s"Extractor '$extractorName' not found for language '${language.wikiCode}'. Available extractors: ${availableExtractors.mkString(", ")}")
@@ -121,12 +100,8 @@ private val singleExtractorCache: LoadingCache[ExtractorCacheKey, ExtractionMana
     val cacheKey = ExtractorCacheKey(language, extractorClass)
     val singleExtractorManager = singleExtractorCache.get(cacheKey)
 
-    logger.info(s"Using cached extraction manager for ${extractorClass.getSimpleName} in ${language.wikiCode}")
-
     // Run extraction with the cached manager
     singleExtractorManager.extract(source, destination, language, true)
-
-    logger.info(s"Successfully completed extraction with ${extractorClass.getSimpleName} for language ${language.wikiCode}")
   }
 
   /**
@@ -186,23 +161,6 @@ private val singleExtractorCache: LoadingCache[ExtractorCacheKey, ExtractionMana
   }
 
   /**
-   * Log the final extractor configuration
-   */
-  private def logExtractorConfiguration(): Unit = {
-    logger.info("=== EXTRACTOR INITIALIZATION COMPLETE ===")
-    languages.foreach { lang =>
-      try {
-        val availableExtractors = getAvailableExtractorNames(lang)
-        logger.info(s"${lang.wikiCode}: ${availableExtractors.length} extractors available")
-      } catch {
-        case e: Exception =>
-          logger.warning(s"${lang.wikiCode}: Failed to get extractor configuration - ${e.getMessage}")
-      }
-    }
-    logger.info("=== END EXTRACTOR INITIALIZATION ===")
-  }
-
-  /**
    * Get cache statistics for monitoring
    */
   def getCacheStats: String = {
@@ -215,7 +173,6 @@ private val singleExtractorCache: LoadingCache[ExtractorCacheKey, ExtractionMana
    */
   def clearCache(): Unit = {
     singleExtractorCache.invalidateAll()
-    logger.info("Single extractor cache cleared")
   }
 }
 
@@ -275,11 +232,18 @@ object Server
         logger.info("DBpedia server started in "+prettyMillis(System.currentTimeMillis - millis) + " listening on " + localServerUrl)
     }
 
-  def buildTemplateRedirects(redirects: Map[String, String], language: Language): Redirects = {
-    new Redirects(redirects.map { case (from, to) =>
-      (WikiTitle.parse(from, language).decoded, WikiTitle.parse(to, language).decoded)
-    })
-  }
+    /**
+     * Builds template redirects from Wiki statistics as collected by {todo link CreateMappingStats}
+     * Main purpose is to clean template names from the template namespace so that redirects can be used in Extractors
+     * (Extractors use decoded wiki titles)
+     * @param redirects
+     * @return
+     */
+    def buildTemplateRedirects(redirects: Map[String, String], language: Language): Redirects = {
+      new Redirects(redirects.map { case (from, to) =>
+        (WikiTitle.parse(from, language).decoded, WikiTitle.parse(to, language).decoded)
+      })
+    }
 
     private val extractionRecorder = new mutable.HashMap[ClassTag[_], mutable.HashMap[Language, ExtractionRecorder[_]]]()
     def getExtractionRecorder[T: ClassTag](lang: Language, dataset : Dataset = null): org.dbpedia.extraction.util.ExtractionRecorder[T] = {
