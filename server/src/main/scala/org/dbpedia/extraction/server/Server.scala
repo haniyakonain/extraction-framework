@@ -2,7 +2,6 @@ package org.dbpedia.extraction.server
 
 import java.net.{URI, URL}
 import java.util.logging.Logger
-import java.util.concurrent.TimeUnit
 
 import com.google.common.cache.{CacheBuilder, CacheLoader, LoadingCache}
 import com.sun.jersey.api.container.httpserver.HttpServerFactory
@@ -44,35 +43,36 @@ class Server(
   private case class ExtractorCacheKey(language: Language, extractorClass: Class[_ <: Extractor[_]])
 
   // Guava LoadingCache for single extractor managers with proper cache loader
-private val singleExtractorCache: LoadingCache[ExtractorCacheKey, ExtractionManager] = {
-  CacheBuilder.newBuilder()
-    .maximumSize(100)
-    //.expireAfterAccess(10, TimeUnit.MINUTES)
-    .build(new CacheLoader[ExtractorCacheKey, ExtractionManager]() {
-      override def load(key: ExtractorCacheKey): ExtractionManager = {
-        val manager = new DynamicExtractionManager(
-          managers(_).updateStats(_),
-          Seq(key.language),
-          paths,
-          redirects,
-          if (mappingTestExtractors.contains(key.extractorClass)) Seq(key.extractorClass) else Seq.empty,
-          if (customTestExtractors.getOrElse(key.language, Seq.empty).contains(key.extractorClass))
-            Map(key.language -> Seq(key.extractorClass)) else Map.empty
-        )
+  private val singleExtractorCache: LoadingCache[ExtractorCacheKey, ExtractionManager] = {
+    CacheBuilder.newBuilder()
+      .maximumSize(200)
+      //.expireAfterAccess(10, TimeUnit.MINUTES)
+      .build(new CacheLoader[ExtractorCacheKey, ExtractionManager]() {
+        override def load(key: ExtractorCacheKey): ExtractionManager = {
+          val manager = new DynamicExtractionManager(
+            managers(_).updateStats(_),
+            Seq(key.language),
+            paths,
+            redirects,
+            if (mappingTestExtractors.contains(key.extractorClass)) Seq(key.extractorClass) else Seq.empty,
+            if (customTestExtractors.getOrElse(key.language, Seq.empty).contains(key.extractorClass))
+              Map(key.language -> Seq(key.extractorClass)) else Map.empty
+          )
 
-        // ADD ERROR HANDLING HERE:
-        try {
-          manager.updateAll
-          manager
-        } catch {
-          case e: Exception =>
-            logger.warning(s"Failed to initialize extraction manager for ${key.extractorClass.getSimpleName} in ${key.language.wikiCode}: ${e.getMessage}")
-            // Return a manager without calling updateAll to avoid mapping issues
+          try {
+            Server.logger.info(s"Initializing extraction manager for ${key.extractorClass.getSimpleName} in ${key.language.wikiCode}")
+            manager.updateAll
+            Server.logger.info(s"Successfully initialized extraction manager for ${key.extractorClass.getSimpleName}")
             manager
+          } catch {
+            case e: Exception =>
+              Server.logger.severe(s"Failed to initialize extraction manager for ${key.extractorClass.getSimpleName} in ${key.language.wikiCode}: ${e.getMessage}")
+              e.printStackTrace()
+              throw e
+          }
         }
-      }
-    })
-}
+      })
+  }
 
   // Main extraction manager with ALL extractors
   val extractor: ExtractionManager = {
@@ -85,8 +85,9 @@ private val singleExtractorCache: LoadingCache[ExtractorCacheKey, ExtractionMana
    * Enhanced extract using a specific extractor with Guava caching optimization
    */
   def extractWithSpecificExtractor(source: Source, destination: Destination, language: Language, extractorName: String): Unit = {
-    // Validate language support - this will throw appropriate exceptions
-    val availableExtractors = getAvailableExtractorNames(language)
+    // Use ServerConfiguration methods for validation and extractor lookup
+    val config = Server.config
+    val availableExtractors = config.getAvailableExtractors(language)
 
     // Find the extractor class
     val extractorClass = findExtractorClass(language, extractorName) match {
@@ -122,42 +123,17 @@ private val singleExtractorCache: LoadingCache[ExtractorCacheKey, ExtractionMana
   }
 
   /**
-   * Get available extractor names for a specific language
+   * Get available extractor names for a specific language - delegates to ServerConfiguration
    */
   def getAvailableExtractorNames(language: Language): Seq[String] = {
-    // Check if language is enabled in configuration
-    if (!managers.contains(language)) {
-      throw new IllegalArgumentException(s"Language '${language.wikiCode}' is not enabled in the configuration. Enabled languages: ${managers.keys.map(_.wikiCode).mkString(", ")}")
-    }
-
-    val customExtractorsForLang = customTestExtractors.getOrElse(language, Seq.empty)
-    val allConfiguredExtractors = (mappingTestExtractors ++ customExtractorsForLang).distinct
-    val extractorNames = allConfiguredExtractors.map(_.getSimpleName).sorted
-
-    // Check if we have any extractors for this enabled language
-    if (extractorNames.isEmpty) {
-      throw new IllegalStateException(s"Language '${language.wikiCode}' is enabled in configuration but has no extractors configured. Please check the extractor configuration.")
-    }
-
-    extractorNames
+    Server.config.getAvailableExtractors(language)
   }
 
   /**
-   * Check if a specific extractor is available for a language
+   * Check if a specific extractor is available for a language - delegates to ServerConfiguration
    */
   def isExtractorAvailable(language: Language, extractorName: String): Boolean = {
-    try {
-      // Check if language is enabled in configuration
-      if (!managers.contains(language)) {
-        return false
-      }
-
-      findExtractorClass(language, extractorName).isDefined
-    } catch {
-      case e: Exception =>
-        logger.warning(s"Error checking extractor availability for '$extractorName' in language '${language.wikiCode}': ${e.getMessage}")
-        false
-    }
+    Server.config.isExtractorAvailable(language, extractorName)
   }
 
   /**
@@ -187,6 +163,17 @@ object Server
     private var _instance: Server = _
 
     def instance: Server = _instance
+
+      /**
+     * Returns the Server instance, throwing an exception if not initialized.
+     * This centralizes the null checking logic used throughout the application.
+     */
+    def getInstance(): Server = {
+      if (_instance == null) {
+        throw new IllegalStateException("Server instance is not initialized")
+      }
+      _instance
+    }
 
     private var _config: ServerConfiguration = _
 

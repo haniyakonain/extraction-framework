@@ -9,6 +9,7 @@ import javax.ws.rs.core.{Context, HttpHeaders, MediaType, Response}
 import java.util.logging.{Level, Logger}
 
 import scala.xml.Elem
+import scala.io.{Codec, Source}
 import org.dbpedia.extraction.server.Server
 import org.dbpedia.extraction.wikiparser.WikiTitle
 import org.dbpedia.extraction.destinations.{DeduplicatingDestination, WriterDestination}
@@ -40,8 +41,7 @@ class Extraction(@PathParam("lang") langCode : String)
     @Produces(Array("application/xhtml+xml"))
   def get = {
     try {
-      val extractors = Server.config.getAvailableExtractors(language)
-
+val extractors = Server.getInstance().getAvailableExtractorNames(language)
        <html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
          {ServerHeader.getHeader("Extractor a page")}
          <body>
@@ -126,11 +126,11 @@ class Extraction(@PathParam("lang") langCode : String)
     }
   }
 
-  /**
-   * Extracts a MediaWiki article
-   */
-  @GET
-  @Path("extract")
+    /**
+     * Extracts a MediaWiki article
+     */
+    @GET
+    @Path("extract")
   def extract(@QueryParam("title") title: String, @QueryParam("revid") @DefaultValue("-1") revid: Long, @QueryParam("format") format: String, @QueryParam("extractors") extractors: String, @Context headers: HttpHeaders): Response = {
     import scala.collection.JavaConverters._
     if (title == null && revid < 0) throw new WebApplicationException(new Exception("title or revid must be given"), Response.Status.NOT_FOUND)
@@ -169,13 +169,13 @@ class Extraction(@PathParam("lang") langCode : String)
     try {
       extractorName match {
         case "mappings" =>
-          Server.instance.extractor.extract(source, destination, language, false)
+          Server.getInstance().extractor.extract(source, destination, language, false)
 
         case "custom" =>
-          Server.instance.extractor.extract(source, destination, language, true)
+          Server.getInstance().extractor.extract(source, destination, language, true)
 
         case specificExtractor =>
-          Server.instance.extractWithSpecificExtractor(source, destination, language, specificExtractor)
+          Server.getInstance().extractWithSpecificExtractor(source, destination, language, specificExtractor)
       }
     } catch {
       case e: IllegalArgumentException =>
@@ -235,7 +235,6 @@ class Extraction(@PathParam("lang") langCode : String)
         case "n-triples" => "application/n-triples"
         case "n-quads" => "application/n-quads"
         case "rdf-json" => MediaType.APPLICATION_JSON
-        case "trix" => MediaType.APPLICATION_XML
         case _ => MediaType.TEXT_PLAIN
       }
     }
@@ -254,7 +253,7 @@ class Extraction(@PathParam("lang") langCode : String)
         val source = XMLSource.fromXML(xml, language)
         val destination = new WriterDestination(() => writer, formatter)
 
-        Server.instance.extractor.extract(source, destination, language)
+        Server.getInstance().extractor.extract(source, destination, language)
 
         writer.toString
     }

@@ -96,16 +96,6 @@ class ServerConfiguration(configPath: String) extends Config(configPath) {
     )
   }
 
-  // Helper method for flexible extractor name matching
-  private def matchesExtractorName(extractorMap: Map[String, Class[_ <: Extractor[_]]], extractorName: String): Boolean = {
-    extractorMap.contains(extractorName) ||
-    extractorMap.contains(extractorName.toLowerCase) ||
-    extractorMap.contains(extractorName + "Extractor") ||
-    extractorMap.contains((extractorName + "Extractor").toLowerCase) ||
-    extractorMap.contains(extractorName.replace("Extractor", "")) ||
-    extractorMap.contains(extractorName.replace("Extractor", "").toLowerCase)
-  }
-
   // Helper method for flexible extractor class lookup
   private def findExtractorClass(extractorMap: Map[String, Class[_ <: Extractor[_]]], extractorName: String): Option[Class[_ <: Extractor[_]]] = {
     extractorMap.get(extractorName)
@@ -114,20 +104,6 @@ class ServerConfiguration(configPath: String) extends Config(configPath) {
       .orElse(extractorMap.get((extractorName + "Extractor").toLowerCase))
       .orElse(extractorMap.get(extractorName.replace("Extractor", "")))
       .orElse(extractorMap.get(extractorName.replace("Extractor", "").toLowerCase))
-  }
-
-  // Cached extractor names by language to avoid repeated computation
-  private lazy val extractorNamesByLanguage: Map[Language, Seq[String]] = {
-    val result = languages.map { language =>
-      val customExtractors = customTestExtractorClasses.getOrElse(language, Seq.empty)
-      val allExtractors = (customExtractors ++ mappingTestExtractorClasses)
-        .map(_.getSimpleName)
-        .distinct
-        .sorted
-      language -> allExtractors
-    }.toMap
-
-    result
   }
 
   // Cached extractor classes by language for fast lookup
@@ -164,37 +140,13 @@ class ServerConfiguration(configPath: String) extends Config(configPath) {
   def getAvailableExtractors(language: Language): Seq[String] = {
     validateLanguageEnabled(language)
 
-    val extractors = extractorNamesByLanguage.getOrElse(language, Seq.empty)
-    if (extractors.isEmpty) {
+    val extractorMap = extractorClassesByLanguage.getOrElse(language, Map.empty)
+    if (extractorMap.isEmpty) {
       throw new IllegalStateException(
         s"Language '${language.wikiCode}' is enabled but has no extractors configured. Please check the extractor configuration."
       )
     }
-    extractors
-  }
-
-  // Check if a specific extractor is available for a language using cached lookup
-  def isExtractorAvailable(language: Language, extractorName: String): Boolean = {
-    try {
-      if (!isLanguageEnabled(language)) return false
-
-      val extractorMap = extractorClassesByLanguage.getOrElse(language, Map.empty)
-      matchesExtractorName(extractorMap, extractorName)
-    } catch {
-      case e: Exception =>
-        logger.warning(
-          s"Error checking extractor availability for '$extractorName' in language '${language.wikiCode}': ${e.getMessage}"
-        )
-        false
-    }
-  }
-
-  // Get extractor classes for a specific language
-  def getExtractorClasses(language: Language): Seq[Class[_ <: Extractor[_]]] = {
-    validateLanguageEnabled(language)
-
-    val customExtractors = customTestExtractorClasses.getOrElse(language, Seq.empty)
-    (customExtractors ++ mappingTestExtractorClasses).distinct
+    extractorMap.keys.toSeq.distinct.sorted
   }
 
   // Get a specific extractor class by name for a language with flexible matching
@@ -212,4 +164,17 @@ class ServerConfiguration(configPath: String) extends Config(configPath) {
         None
     }
   }
+
+  // Check if a specific extractor is available for a language using cached lookup
+  def isExtractorAvailable(language: Language, extractorName: String): Boolean = {
+    getExtractorClass(language, extractorName).isDefined
+  }
+
+// Get extractor classes for a specific language
+def getExtractorClasses(language: Language): Seq[Class[_ <: Extractor[_]]] = {
+  validateLanguageEnabled(language)
+
+  val extractorMap = extractorClassesByLanguage.getOrElse(language, Map.empty)
+  extractorMap.values.toSeq.distinct
+}
 }
