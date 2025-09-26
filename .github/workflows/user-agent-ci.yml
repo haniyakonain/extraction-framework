@@ -2,13 +2,13 @@ name: WikiApi User Agent CI
 
 on:
   push:
-    branches: [master, develop]
+    branches: [master, develop, add-wikiapi-ci-workflow]
     paths:
       - 'core/src/main/scala/org/dbpedia/extraction/util/WikiApi.scala'
       - 'pom.xml'
       - '**/pom.xml'
   pull_request:
-    branches: [master, develop]
+    branches: [master, develop, add-wikiapi-ci-workflow]
     paths:
       - 'core/src/main/scala/org/dbpedia/extraction/util/WikiApi.scala'
       - 'pom.xml'
